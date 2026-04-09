@@ -13,88 +13,117 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-tracking_unban = {}
 tracking_ban = {}
+tracking_unban = {}
 
+# ⏱ time format
+def format_time(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h:02d}h {m:02d}m {s:02d}s"
+
+# 🔍 Instagram data + DP
 def get_data(username):
     try:
-        r = requests.get(f"https://www.instagram.com/{username}/")
-        if r.status_code != 200:
+        url = f"https://www.instagram.com/{username}/"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers)
+
+        if r.status_code == 404:
             return None
 
         text = r.text
 
+        # DP extract
         dp_match = re.search(r'"profile_pic_url_hd":"(.*?)"', text)
         dp = dp_match.group(1).replace("\\u0026", "&") if dp_match else None
 
         if f'"username":"{username}"' in text:
             return {"dp": dp}
 
-        return None
+        return "error"
+
     except:
-        return None
+        return "error"
+
+# 🔴 BAN command
+@bot.command()
+async def ban(ctx, username):
+    tracking_ban[username] = time.time()
+
+    embed = discord.Embed(
+        description=f"🚫 Monitoring BAN for @{username}...",
+        color=0xED4245
+    )
+    await ctx.send(embed=embed)
+
+# 🟢 UNBAN command
+@bot.command()
+async def unban(ctx, username):
+    tracking_unban[username] = time.time()
+
+    embed = discord.Embed(
+        description=f"🟢 Monitoring UNBAN for @{username}...",
+        color=0x57F287
+    )
+    await ctx.send(embed=embed)
+
+# 🔁 LOOP
+@tasks.loop(seconds=15)
+async def check_accounts():
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+
+            # 🔴 BAN CHECK
+            for username in list(tracking_ban.keys()):
+                data = get_data(username)
+
+                if data is None:
+                    total = int(time.time() - tracking_ban[username])
+
+                    embed = discord.Embed(
+                        title="🚫 Account Banned",
+                        color=0xED4245
+                    )
+
+                    embed.add_field(name="👤 Username", value=f"@{username}", inline=False)
+                    embed.add_field(name="🔒 Status", value="Banned", inline=True)
+                    embed.add_field(name="⏱ Time Taken", value=format_time(total), inline=True)
+
+                    embed.set_footer(text=f"Detected at {datetime.now().strftime('%H:%M:%S')}")
+
+                    await channel.send(embed=embed)
+                    tracking_ban.pop(username)
+
+            # 🟢 UNBAN CHECK
+            for username in list(tracking_unban.keys()):
+                data = get_data(username)
+
+                if isinstance(data, dict):
+                    total = int(time.time() - tracking_unban[username])
+
+                    embed = discord.Embed(
+                        title="🏆 Account Recovered",
+                        color=0x57F287
+                    )
+
+                    embed.add_field(name="👤 Username", value=f"@{username}", inline=False)
+                    embed.add_field(name="🔓 Status", value="Active", inline=True)
+                    embed.add_field(name="⏱ Time Taken", value=format_time(total), inline=True)
+
+                    # DP add
+                    if data["dp"]:
+                        embed.set_thumbnail(url=data["dp"])
+
+                    embed.set_footer(text=f"Recovered at {datetime.now().strftime('%H:%M:%S')}")
+
+                    await channel.send(embed=embed)
+                    tracking_unban.pop(username)
 
 @bot.event
 async def on_ready():
-    print("Bot Online")
-    monitor.start()
-
-@bot.command()
-async def track(ctx, username: str):
-    tracking_unban[username] = {
-        "start": time.time(),
-        "channel": ctx.channel
-    }
-    await ctx.send(f"📡 Monitoring UNBAN for @{username}...")
-
-@bot.command()
-async def ban(ctx, username: str):
-    tracking_ban[username] = {
-        "start": time.time(),
-        "channel": ctx.channel
-    }
-    await ctx.send(f"🚨 Monitoring BAN for @{username}...")
-
-@tasks.loop(seconds=90)
-async def monitor():
-
-    for username in list(tracking_unban.keys()):
-        data = tracking_unban[username]
-        result = get_data(username)
-
-        if result:
-            time_taken = int(time.time() - data["start"])
-
-            embed = discord.Embed(
-                title=f"Account Recovered | @{username} 🏆",
-                description=f"🔓 Status: Unbanned\n⏱ Time Taken: {time_taken} sec",
-                color=0x57F287
-            )
-
-            if result["dp"]:
-                embed.set_thumbnail(url=result["dp"])
-
-            embed.set_footer(text=f"Recovered at {datetime.now().strftime('%H:%M:%S')}")
-
-            await data["channel"].send(embed=embed)
-            del tracking_unban[username]
-
-    for username in list(tracking_ban.keys()):
-        data = tracking_ban[username]
-        result = get_data(username)
-
-        if not result:
-            time_taken = int(time.time() - data["start"])
-
-            embed = discord.Embed(
-                title=f"Account Banned | @{username} 🚫",
-                description=f"🔒 Status: Banned\n⏱ Time Taken: {time_taken} sec",
-                color=0xED4245
-            )
-
-            embed.set_footer(text=f"Detected at {datetime.now().strftime('%H:%M:%S')}")
-
-            await data["channel"].send(embed=embed)
-            del tracking_ban[username]
+    print(f"🔥 Bot Online: {bot.user}")
+    check_accounts.start()
 
 bot.run(TOKEN)
