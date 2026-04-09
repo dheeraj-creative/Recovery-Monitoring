@@ -3,7 +3,6 @@ from discord.ext import commands, tasks
 import requests
 import time
 import os
-import re
 from datetime import datetime
 
 TOKEN = os.getenv("TOKEN")
@@ -23,24 +22,28 @@ def format_time(seconds):
     s = seconds % 60
     return f"{h:02d}h {m:02d}m {s:02d}s"
 
-# 🔍 Instagram data + DP
+# 🔥 FIXED Instagram API (NO HTML ERROR)
 def get_data(username):
     try:
-        url = f"https://www.instagram.com/{username}/"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "x-ig-app-id": "936619743392459"
+        }
+
         r = requests.get(url, headers=headers)
 
-        if r.status_code == 404:
+        if r.status_code == 200:
+            data = r.json()
+
+            if "data" in data and data["data"]["user"]:
+                user = data["data"]["user"]
+                return {
+                    "dp": user.get("profile_pic_url_hd")
+                }
+
+        elif r.status_code == 404:
             return None
-
-        text = r.text
-
-        # DP extract
-        dp_match = re.search(r'"profile_pic_url_hd":"(.*?)"', text)
-        dp = dp_match.group(1).replace("\\u0026", "&") if dp_match else None
-
-        if f'"username":"{username}"' in text:
-            return {"dp": dp}
 
         return "error"
 
@@ -112,8 +115,8 @@ async def check_accounts():
                     embed.add_field(name="🔓 Status", value="Active", inline=True)
                     embed.add_field(name="⏱ Time Taken", value=format_time(total), inline=True)
 
-                    # DP add
-                    if data["dp"]:
+                    # DP show
+                    if data.get("dp"):
                         embed.set_thumbnail(url=data["dp"])
 
                     embed.set_footer(text=f"Recovered at {datetime.now().strftime('%H:%M:%S')}")
